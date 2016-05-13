@@ -191,18 +191,19 @@ int main(){
 				break;
 			case 112: //'p' has been pressed. this will pause/resume the code.
 				pause = !pause;
-				if(pause == true){ cout<<"Code paused, press 'p' again to resume"<<endl;
-				while (pause == true){
-					//stay in this loop until 
-					switch (waitKey()){
-						//a switch statement inside a switch statement? Mind blown.
-					case 112: 
-						//change pause back to false
-						pause = false;
-						cout<<"Code Resumed"<<endl;
-						break;
+				if(pause == true){ 
+					cout<<"Code paused, press 'p' again to resume"<<endl;
+					while (pause == true){
+						//stay in this loop until 
+						switch (waitKey()){
+							//a switch statement inside a switch statement? Mind blown.
+						case 112: 
+							//change pause back to false
+							pause = false;
+							cout<<"Code Resumed"<<endl;
+							break;
+						}
 					}
-				}
 				}
 
 
