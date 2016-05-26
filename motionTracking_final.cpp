@@ -29,7 +29,7 @@ const static int BLUR_SIZE = 10;
 //and keep track of its position.
 int theObject[2] = {0,0};
 //bounding rectangle of the object, we will use the center of this as its position.
-Rect objectBoundingRectangle = Rect(0,0,0,0);
+// Rect objectBoundingRectangle = Rect(0,0,0,0);
 
 
 //int to string helper function
@@ -41,7 +41,7 @@ string intToString(int number){
 	return ss.str();
 }
 
-void searchForMovement(Mat thresholdImage, Mat &cameraFeed){
+void searchForMovement(Mat& thresholdImage, Mat &cameraFeed){
 	//notice how we use the '&' operator for objectDetected and cameraFeed. This is because we wish
 	//to take the values passed into the function and manipulate them, rather than just working with a copy.
 	//eg. we draw to the cameraFeed to be displayed in the main() function.
@@ -56,33 +56,81 @@ void searchForMovement(Mat thresholdImage, Mat &cameraFeed){
 	//findContours(temp,contours,hierarchy,CV_RETR_EXTERNAL,CV_CHAIN_APPROX_SIMPLE );// retrieves external contours
 
 	//if contours vector is not empty, we have found some objects
-	if(contours.size()>0)objectDetected=true;
+	if(contours.size()>0) objectDetected=true;
 	else objectDetected = false;
 
 	if(objectDetected){
 		//the largest contour is found at the end of the contours vector
 		//we will simply assume that the biggest contour is the object we are looking for.
-		cout << "object detect : " << contours.size() << endl;
-		vector< vector<Point> > largestContourVec(contours);
-		// largestContourVec.push_back(contours.at(contours.size()-1));
+		// cout << "object detect : " << contours.size() << endl;
 
 		//make a bounding rectangle around the largest contour then find its centroid
 		//this will be the object's final estimated position.
-		objectBoundingRectangle = boundingRect(largestContourVec.at(0));
-		for(int i = 0; i < largestContourVec.size(); i++) {
-			objectBoundingRectangle = boundingRect(largestContourVec.at(i));
-			int x = objectBoundingRectangle.x;
-			int y = objectBoundingRectangle.y;
-			int h = objectBoundingRectangle.height;
-			int w = objectBoundingRectangle.width;
 
-			cout << "object detected (" << i << ") : (" << x << ',' << y << ')' << endl;
-			rectangle(cameraFeed, Point(x, y), Point(x+w, y+w), Scalar(255, 0, 0), 2);
-			putText(cameraFeed, "Object", Point(x,y), 1, 1, Scalar(255,0,0),2);
+		//중복된 object를 제거한다.
+		vector<int> parents(contours.size(), -1);
+
+		for(int i = 0; i < contours.size(); i++) {
+			if(parents[i] != -1)	//이미 속한 그룹이 있는 경우 더이상 연산을 할 필요가 없다.
+				continue;
+			Rect objectA = boundingRect(contours[i]);
+
+			for(int j = i + 1; j < contours.size(); j++) {
+				if(parents[j] != -1)
+					continue;
+				Rect objectB = boundingRect(contours[j]);
+				Rect objectInter = objectA | objectB; //겹치는 부분의 큰 영역으로 만든다
+
+				if(objectA == objectInter)
+					parents[j] = i;
+				else if(objectB == objectInter) {
+					parents[i] = j;
+					break;
+				}
+			}
+		}
+
+		vector<Rect> objects;
+		for(int i = 0; i < contours.size(); i++) {
+			if(parents[i] == -1)
+				objects.push_back(boundingRect(contours[i]));
+		}
+
+		//이미지를 하나로 합치기 위한 작업, max_height 계산
+
+		int max_height = 0;
+		int max_width = 0;
+		for(auto iter = objects.begin(); iter != objects.end(); iter++) {
+			max_height = iter->height > max_height ? iter->height : max_height;
+			max_width += iter->width;
+		}
+		//size, depth(pixel range), channel
+		//cv::IplImage *DispImage = cv::cvCreateImage( cv::cvSize(max_width, max_height), 8, 3);
+		
+		Mat croppedImage = Mat::zeros(max_height, max_width, CV_8UC3);//(max_height, max_width, CV_8UC3, 0);
+		// croppedImage.setTo(Scalar::all(0));
+		static int cnt = 0;
+		int x = 0;
+		for(int i = 0; i < objects.size(); i++) {
+			Rect object = objects[i];
+
+			Mat img = cameraFeed(object);
+			img.copyTo(croppedImage(Rect(x, 0, object.width, object.height)));
+			x += object.width;
+		}
+		cv::imshow("cropped", croppedImage);
+		// char str[100];
+		// sprintf(str, "./img/img%05d.jpg", cnt++);
+		// cv::imwrite(str, croppedImage);
+
+		for(int i = 0; i < objects.size(); i++) {
+			Rect object = objects[i];
+			rectangle(cameraFeed, object.tl(), object.br(), Scalar(255, 0, 0), 2);
+			putText(cameraFeed, "Object", object.tl(), 1, 1, Scalar(255,0,0),2);	
 		}
 	}
 }
-int main(){
+int main(int argc, char** argv){
 
 	//some boolean variables for added functionality
 	bool objectDetected = false;
@@ -101,7 +149,13 @@ int main(){
 	//thresholded difference image (for use in findContours() function)
 	Mat thresholdImage;
 	//video capture object.
-	VideoCapture capture("sample/1/view1.mp4");
+	
+	VideoCapture capture;
+	if(argc != 2)
+		capture = VideoCapture(-1);
+	else
+		capture = VideoCapture(argv[1]);
+
 	capture.set(CV_CAP_PROP_FRAME_WIDTH, 640);
 	capture.set(CV_CAP_PROP_FRAME_HEIGHT, 480);
 
@@ -122,25 +176,34 @@ int main(){
 	//if this is not included, we get a memory error!
 	int cnt = 0;
 	const int frame_keeping_cnt = 3;
+	int test = 0;
 	while(1){
+		test++;
+		// while (test > 10) {
+		// 	//stay in this loop until 
+		// 	switch (waitKey()){
+		// 		//a switch statement inside a switch statement? Mind blown.
+		// 	case 112: 
+		// 		//change pause back to false
+		// 		pause = false;
+		// 		cout<<"Code Resumed"<<endl;
+		// 		break;
+		// 	}
+		// }
 		capture.read(capturedFrame);
+
+		cv::cvtColor(capturedFrame,grayImage1,COLOR_BGR2GRAY);
+		cv::GaussianBlur(grayImage1, grayImage1, cv::Size(21, 21), 0);
 		
-		imageQ.push(capturedFrame.clone());
+		imageQ.push(grayImage1.clone());
 		//read first frame
 		if(imageQ.size() < frame_keeping_cnt) {
 			continue;
 		}
 
-		Mat prevFrame = imageQ.front();
+		Mat grayImage2 = imageQ.front();
 		imageQ.pop();
 
-		cv::cvtColor(capturedFrame,grayImage1,COLOR_BGR2GRAY);
-		cv::cvtColor(prevFrame,grayImage2,COLOR_BGR2GRAY);
-		cv::GaussianBlur(grayImage1, grayImage1, cv::Size(21, 21), 0);
-		cv::GaussianBlur(grayImage2, grayImage2, cv::Size(21, 21), 0);
-
-		//perform frame differencing with the sequential images. This will output an "intensity image"
-		//do not confuse this with a threshold image, we will need to perform thresholding afterwards.
 		cv::absdiff(grayImage1,grayImage2,differenceImage);
 		//threshold intensity image at a given sensitivity value
 		cv::threshold(differenceImage,thresholdImage,SENSITIVITY_VALUE,255,THRESH_BINARY);
